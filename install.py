@@ -106,7 +106,7 @@ def main():
     #     choices=list(DISPLAY_LANGUAGES.keys()),
     #     default=current_display
     # ).execute()]
-    update_key("display_language", current_display)
+    # update_key("display_language", current_display)
 
     console.print(Panel.fit(t("🚀 Starting Installation"), style="bold magenta"))
 
@@ -172,7 +172,7 @@ def main():
     console.print(Panel(panel2_text, style="yellow"))
 
     # start the application
-    subprocess.Popen(["streamlit", "run", "st.py"])
+    # subprocess.Popen(["streamlit", "run", "st.py"])
 
 if __name__ == "__main__":
     main()
