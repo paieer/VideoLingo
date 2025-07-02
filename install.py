@@ -101,23 +101,19 @@ def main():
     current_language = load_key("display_language")
     # Find the display name for current language code
     current_display = next((k for k, v in DISPLAY_LANGUAGES.items() if v == current_language), "🇬🇧 English")
-    selected_language = DISPLAY_LANGUAGES[inquirer.select(
-        message="Select language / 选择语言 / 選擇語言 / 言語を選択 / Seleccionar idioma / Sélectionner la langue / Выберите язык:",
-        choices=list(DISPLAY_LANGUAGES.keys()),
-        default=current_display
-    ).execute()]
-    update_key("display_language", selected_language)
+    # selected_language = DISPLAY_LANGUAGES[inquirer.select(
+    #     message="Select language / 选择语言 / 選擇語言 / 言語を選択 / Seleccionar idioma / Sélectionner la langue / Выберите язык:",
+    #     choices=list(DISPLAY_LANGUAGES.keys()),
+    #     default=current_display
+    # ).execute()]
+    update_key("display_language", current_display)
 
     console.print(Panel.fit(t("🚀 Starting Installation"), style="bold magenta"))
 
     # Configure mirrors
     # add a check to ask user if they want to configure mirrors
-    if inquirer.confirm(
-        message=t("Do you need to auto-configure PyPI mirrors? (Recommended if you have difficulty accessing pypi.org)"),
-        default=True
-    ).execute():
-        from core.utils.pypi_autochoose import main as choose_mirror
-        choose_mirror()
+    from core.utils.pypi_autochoose import main as choose_mirror
+    choose_mirror()
 
     # Detect system and GPU
     has_gpu = platform.system() != 'Darwin' and check_nvidia_gpu()
