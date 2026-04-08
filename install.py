@@ -240,7 +240,6 @@ def main():
     console.print(Panel(panel2_text, style="yellow"))
 
     # start the application
-    subprocess.Popen([sys.executable, "-m", "streamlit", "run", "st.py"])
-
+    # subprocess.Popen([sys.executable, "-m", "streamlit", "run", "st.py"])
 if __name__ == "__main__":
     main()
