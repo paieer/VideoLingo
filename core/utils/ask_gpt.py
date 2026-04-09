@@ -53,7 +53,11 @@ def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default"):
     model = load_key("api.model")
     base_url = load_key("api.base_url")
 
-    client = OpenAI(api_key=load_key("api.key"), base_url=base_url)
+    client = OpenAI(
+        api_key=load_key("api.key"),
+        base_url=base_url,
+        default_headers={"User-Agent": "Mozilla/5.0"},
+    )
     response_format = {"type": "json_object"} if resp_type == "json" and load_key("api.llm_support_json") else None
 
     messages = [{"role": "user", "content": prompt}]
