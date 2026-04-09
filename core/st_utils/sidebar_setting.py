@@ -327,7 +327,7 @@ def page_setting():
 def check_api():
     try:
         resp = ask_gpt(
-            "This is a test, response 'message':'success' in json format.",
+            "hi! this is a test, response 'message':'success' in json format.",
             resp_type="json",
             log_title="None",
         )
