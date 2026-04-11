@@ -1,7 +1,18 @@
 import streamlit as st
 import os, sys, time
 from core.st_utils.imports_and_utils import *
+from core.st_utils.download_video_section import get_selected_task_dir
 from core.st_utils.task_runner import TaskRunner
+from core.st_utils.task_manager import (
+    STAGE1_SUBTITLE_NAME,
+    bind_task_steps,
+    detect_task_status,
+    export_stage1_source_subtitles,
+    mark_task_stage,
+    prepare_stage_retry,
+    sync_task_to_workspace,
+    sync_workspace_to_task,
+)
 from core import *
 
 # SET PATH
@@ -13,6 +24,7 @@ st.set_page_config(page_title="VideoLingo", page_icon="docs/logo.svg")
 
 SUB_VIDEO = "output/output_sub.mp4"
 DUB_VIDEO = "output/output_dub.mp4"
+STAGE1_SOURCE_SUBTITLE = os.path.join("output", STAGE1_SUBTITLE_NAME)
 
 
 # ─── Task control UI (auto-refreshes every 1s while task is active) ───
@@ -122,47 +134,127 @@ def _get_text_steps():
     return steps
 
 
+def _get_stage1_steps():
+    return [
+        (t("WhisperX word-level transcription"), _2_asr.transcribe),
+        ("Export source subtitles", lambda: export_stage1_source_subtitles()),
+    ]
+
+
+def _get_stage2_steps():
+    return [
+        (
+            t("Sentence segmentation using NLP and LLM"),
+            lambda: (
+                _3_1_split_nlp.split_by_spacy(),
+                _3_2_split_meaning.split_sentences_by_meaning(),
+            ),
+        ),
+        (
+            t("Summarization and multi-step translation"),
+            lambda: (_4_1_summarize.get_summary(), _4_2_translate.translate_all()),
+        ),
+        (
+            t("Cutting and aligning long subtitles"),
+            lambda: (
+                _5_split_sub.split_for_sub_main(),
+                _6_gen_sub.align_timestamp_main(),
+            ),
+        ),
+        (
+            t("Merging subtitles into the video"),
+            _7_sub_into_vid.merge_subtitles_to_video,
+        ),
+    ]
+
+
+def _start_task_runner(runner_key: str, task_dir: str, stage_name: str, steps):
+    runner = TaskRunner.get(st.session_state, runner_key)
+    runner.start(
+        bind_task_steps(task_dir, steps),
+        before_run=lambda: (
+            mark_task_stage(task_dir, stage_name, "running"),
+            sync_task_to_workspace(task_dir),
+        ),
+        cleanup_run=lambda: sync_workspace_to_task(task_dir),
+        on_success=lambda: mark_task_stage(task_dir, stage_name, "completed"),
+        on_error=lambda exc: mark_task_stage(
+            task_dir, stage_name, "failed", error_msg=str(exc)
+        ),
+        on_stopped=lambda: mark_task_stage(task_dir, stage_name, "stopped"),
+    )
+
+
 def text_processing_section():
-    st.header(t("b. Translate and Generate Subtitles"))
-    runner = TaskRunner.get(st.session_state, "_text_runner")
+    st.header("b. Subtitle Workflow")
+    task_dir = get_selected_task_dir()
+
+    if not task_dir:
+        st.info("Create or select a task first.")
+        return False
+
+    status = detect_task_status(task_dir)
+    stage1_runner = TaskRunner.get(st.session_state, "_stage1_runner")
+    stage2_runner = TaskRunner.get(st.session_state, "_stage2_runner")
 
     with st.container(border=True):
+        st.subheader("Stage 1: ASR and source subtitles")
         st.markdown(
-            f"""
-        <p style='font-size: 20px;'>
-        {t("This stage includes the following steps:")}
-        <p style='font-size: 20px;'>
-            1. {t("WhisperX word-level transcription")}<br>
-            2. {t("Sentence segmentation using NLP and LLM")}<br>
-            3. {t("Summarization and multi-step translation")}<br>
-            4. {t("Cutting and aligning long subtitles")}<br>
-            5. {t("Generating timeline and subtitles")}<br>
-            6. {t("Merging subtitles into the video")}
-        """,
-            unsafe_allow_html=True,
+            """
+        1. Extract audio from the current task media
+        2. Run WhisperX transcription
+        3. Export a source subtitle file for handoff
+        """
         )
 
-        if not os.path.exists(SUB_VIDEO):
-            if runner.is_active:
-                _task_control_panel("_text_runner")
-            elif runner.is_done:
-                _task_control_panel("_text_runner")
-            else:
-                if st.button(
-                    t("Start Processing Subtitles"), key="text_processing_button"
-                ):
-                    steps = _get_text_steps()
-                    runner.start(steps)
-                    st.rerun()
+        if status.stage1 == "completed":
+            st.success("Stage 1 completed. The task is ready for Stage 2 on this or another machine.")
+            if os.path.exists(STAGE1_SOURCE_SUBTITLE):
+                with open(STAGE1_SOURCE_SUBTITLE, "rb") as subtitle_file:
+                    st.download_button(
+                        "Download Stage 1 subtitles",
+                        data=subtitle_file.read(),
+                        file_name=STAGE1_SUBTITLE_NAME,
+                        mime="application/x-subrip",
+                    )
+        elif stage1_runner.is_active or stage1_runner.is_done:
+            _task_control_panel("_stage1_runner")
         else:
-            if load_key("burn_subtitles"):
+            stage1_label = "Retry Stage 1" if status.stage1 in ("failed", "stopped") else "Start Stage 1"
+            if st.button(stage1_label, key="stage1_processing_button"):
+                if status.stage1 in ("failed", "stopped"):
+                    prepare_stage_retry(task_dir, "stage1")
+                _start_task_runner("_stage1_runner", task_dir, "stage1", _get_stage1_steps())
+                st.rerun()
+
+        st.divider()
+        st.subheader("Stage 2: AI refinement and final subtitles")
+        st.markdown(
+            f"""
+        1. {t("Sentence segmentation using NLP and LLM")}
+        2. {t("Summarization and multi-step translation")}
+        3. {t("Cutting and aligning long subtitles")}
+        4. {t("Merging subtitles into the video")}
+        """
+        )
+
+        if status.stage1 != "completed":
+            st.info("Stage 2 will unlock after Stage 1 produces the source subtitle files.")
+        elif status.stage2 == "completed":
+            st.success("Stage 2 completed.")
+            if os.path.exists(SUB_VIDEO):
                 st.video(SUB_VIDEO)
             download_subtitle_zip_button(text=t("Download All Srt Files"))
-
-            if st.button(t("Archive to 'history'"), key="cleanup_in_text_processing"):
-                cleanup()
+        elif stage2_runner.is_active or stage2_runner.is_done:
+            _task_control_panel("_stage2_runner")
+        else:
+            stage2_label = "Retry Stage 2" if status.stage2 in ("failed", "stopped") else "Start Stage 2"
+            if st.button(stage2_label, key="stage2_processing_button"):
+                if status.stage2 in ("failed", "stopped"):
+                    prepare_stage_retry(task_dir, "stage2")
+                _start_task_runner("_stage2_runner", task_dir, "stage2", _get_stage2_steps())
                 st.rerun()
-            return True
+        return True
 
 
 # ─── Audio processing ───
@@ -188,7 +280,12 @@ def _get_audio_steps():
 
 def audio_processing_section():
     st.header(t("c. Dubbing"))
+    task_dir = get_selected_task_dir()
     runner = TaskRunner.get(st.session_state, "_audio_runner")
+
+    if not task_dir:
+        st.info("Create or select a task first.")
+        return
 
     with st.container(border=True):
         st.markdown(
@@ -214,7 +311,7 @@ def audio_processing_section():
                     t("Start Audio Processing"), key="audio_processing_button"
                 ):
                     steps = _get_audio_steps()
-                    runner.start(steps)
+                    _start_task_runner("_audio_runner", task_dir, "audio", steps)
                     st.rerun()
         else:
             st.success(

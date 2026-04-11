@@ -1,0 +1,1 @@
+.venv/bin/streamlit run st.py

@@ -38,6 +38,11 @@ class TaskRunner:
     _stop_event: threading.Event = field(default_factory=threading.Event)
     _thread: threading.Thread | None = None
     _steps: list = field(default_factory=list)
+    _before_run: Callable | None = None
+    _cleanup_run: Callable | None = None
+    _on_success: Callable | None = None
+    _on_error: Callable | None = None
+    _on_stopped: Callable | None = None
 
     def __post_init__(self):
         self._pause_event.set()  # not paused initially
@@ -52,7 +57,15 @@ class TaskRunner:
 
     # ------ Control API ------
 
-    def start(self, steps: list[tuple[str, Callable]]):
+    def start(
+        self,
+        steps: list[tuple[str, Callable]],
+        before_run: Callable | None = None,
+        cleanup_run: Callable | None = None,
+        on_success: Callable | None = None,
+        on_error: Callable | None = None,
+        on_stopped: Callable | None = None,
+    ):
         """Start executing steps in a background thread.
 
         Args:
@@ -62,6 +75,11 @@ class TaskRunner:
             return  # already running
 
         self._steps = steps
+        self._before_run = before_run
+        self._cleanup_run = cleanup_run
+        self._on_success = on_success
+        self._on_error = on_error
+        self._on_stopped = on_stopped
         self.total_steps = len(steps)
         self.current_step = -1
         self.current_label = ""
@@ -100,6 +118,11 @@ class TaskRunner:
             self.current_label = ""
             self.error_msg = ""
             self._steps = []
+            self._before_run = None
+            self._cleanup_run = None
+            self._on_success = None
+            self._on_error = None
+            self._on_stopped = None
 
     @property
     def is_active(self) -> bool:
@@ -121,10 +144,15 @@ class TaskRunner:
     def _run(self):
         """Execute steps sequentially in background thread."""
         try:
+            if self._before_run:
+                self._before_run()
+
             for i, (label, func) in enumerate(self._steps):
                 # Check stop before each step
                 if self._stop_event.is_set():
                     self.state = "stopped"
+                    if self._on_stopped:
+                        self._on_stopped()
                     return
 
                 # Block if paused
@@ -133,6 +161,8 @@ class TaskRunner:
                 # Check stop again after resume
                 if self._stop_event.is_set():
                     self.state = "stopped"
+                    if self._on_stopped:
+                        self._on_stopped()
                     return
 
                 self.current_step = i
@@ -140,6 +170,18 @@ class TaskRunner:
                 func()
 
             self.state = "completed"
+            if self._on_success:
+                self._on_success()
         except Exception as e:
             self.error_msg = str(e)
             self.state = "error"
+            if self._on_error:
+                self._on_error(e)
+        finally:
+            if self._cleanup_run:
+                try:
+                    self._cleanup_run()
+                except Exception as cleanup_error:
+                    if self.state != "error":
+                        self.error_msg = str(cleanup_error)
+                        self.state = "error"

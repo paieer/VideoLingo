@@ -1,8 +1,11 @@
+from contextlib import contextmanager
+from pathlib import Path
 from ruamel.yaml import YAML
 import threading
 
-CONFIG_PATH = 'config.yaml'
+ROOT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
 lock = threading.Lock()
+_thread_state = threading.local()
 
 yaml = YAML()
 yaml.preserve_quotes = True
@@ -11,9 +14,35 @@ yaml.preserve_quotes = True
 # load & update config
 # -----------------------
 
+
+def get_config_path():
+    return Path(getattr(_thread_state, "config_path", ROOT_CONFIG_PATH))
+
+
+def set_config_path(path):
+    _thread_state.config_path = str(Path(path))
+
+
+def reset_config_path():
+    if hasattr(_thread_state, "config_path"):
+        delattr(_thread_state, "config_path")
+
+
+@contextmanager
+def use_config_path(path):
+    previous = getattr(_thread_state, "config_path", None)
+    set_config_path(path)
+    try:
+        yield
+    finally:
+        if previous is None:
+            reset_config_path()
+        else:
+            _thread_state.config_path = previous
+
 def load_key(key):
     with lock:
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as file:
+        with open(get_config_path(), 'r', encoding='utf-8') as file:
             data = yaml.load(file)
 
     keys = key.split('.')
@@ -27,7 +56,8 @@ def load_key(key):
 
 def update_key(key, new_value):
     with lock:
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as file:
+        config_path = get_config_path()
+        with open(config_path, 'r', encoding='utf-8') as file:
             data = yaml.load(file)
 
         keys = key.split('.')
@@ -40,7 +70,7 @@ def update_key(key, new_value):
 
         if isinstance(current, dict) and keys[-1] in current:
             current[keys[-1]] = new_value
-            with open(CONFIG_PATH, 'w', encoding='utf-8') as file:
+            with open(config_path, 'w', encoding='utf-8') as file:
                 yaml.dump(data, file)
             return True
         else:

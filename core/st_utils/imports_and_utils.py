@@ -5,10 +5,12 @@ from core.st_utils.download_video_section import download_video_section
 from core.st_utils.sidebar_setting import page_setting
 from translations.translations import translate as t
 
-def download_subtitle_zip_button(text: str):
+def download_subtitle_zip_button(text: str, output_dir: str = "output"):
     zip_buffer = io.BytesIO()
-    output_dir = "output"
-    
+
+    if not os.path.exists(output_dir):
+        return
+
     with zipfile.ZipFile(zip_buffer, "w") as zip_file:
         for file_name in os.listdir(output_dir):
             if file_name.endswith(".srt"):

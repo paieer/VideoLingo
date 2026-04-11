@@ -12,33 +12,48 @@ from core.utils.decorator import except_handler
 # ------------
 
 LOCK = Lock()
-GPT_LOG_FOLDER = 'output/gpt_log'
+GPT_LOG_FOLDER = "output/gpt_log"
 
-def _save_cache(model, prompt, resp_content, resp_type, resp, message=None, log_title="default"):
+
+def _save_cache(
+    model, prompt, resp_content, resp_type, resp, message=None, log_title="default"
+):
     with LOCK:
         logs = []
         file = os.path.join(GPT_LOG_FOLDER, f"{log_title}.json")
         os.makedirs(os.path.dirname(file), exist_ok=True)
         if os.path.exists(file):
-            with open(file, 'r', encoding='utf-8') as f:
+            with open(file, "r", encoding="utf-8") as f:
                 logs = json.load(f)
-        logs.append({"model": model, "prompt": prompt, "resp_content": resp_content, "resp_type": resp_type, "resp": resp, "message": message})
-        with open(file, 'w', encoding='utf-8') as f:
+        logs.append(
+            {
+                "model": model,
+                "prompt": prompt,
+                "resp_content": resp_content,
+                "resp_type": resp_type,
+                "resp": resp,
+                "message": message,
+            }
+        )
+        with open(file, "w", encoding="utf-8") as f:
             json.dump(logs, f, ensure_ascii=False, indent=4)
+
 
 def _load_cache(prompt, resp_type, log_title):
     with LOCK:
         file = os.path.join(GPT_LOG_FOLDER, f"{log_title}.json")
         if os.path.exists(file):
-            with open(file, 'r', encoding='utf-8') as f:
+            with open(file, "r", encoding="utf-8") as f:
                 for item in json.load(f):
                     if item["prompt"] == prompt and item["resp_type"] == resp_type:
                         return item["resp"]
         return False
 
+
 # ------------
 # ask gpt once
 # ------------
+
 
 @except_handler("GPT request failed", retry=5)
 def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default"):
@@ -58,15 +73,16 @@ def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default"):
         base_url=base_url,
         default_headers={"User-Agent": "Mozilla/5.0"},
     )
-    response_format = {"type": "json_object"} if resp_type == "json" and load_key("api.llm_support_json") else None
+    response_format = (
+        {"type": "json_object"}
+        if resp_type == "json" and load_key("api.llm_support_json")
+        else None
+    )
 
     messages = [{"role": "user", "content": prompt}]
 
     params = dict(
-        model=model,
-        messages=messages,
-        response_format=response_format,
-        timeout=300
+        model=model, messages=messages, response_format=response_format, timeout=300
     )
     resp_raw = client.chat.completions.create(**params)
 
@@ -76,20 +92,31 @@ def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default"):
         resp = json_repair.loads(resp_content)
     else:
         resp = resp_content
-    
+
     # check if the response format is valid
     if valid_def:
         valid_resp = valid_def(resp)
-        if valid_resp['status'] != 'success':
-            _save_cache(model, prompt, resp_content, resp_type, resp, log_title="error", message=valid_resp['message'])
+        if valid_resp["status"] != "success":
+            _save_cache(
+                model,
+                prompt,
+                resp_content,
+                resp_type,
+                resp,
+                log_title="error",
+                message=valid_resp["message"],
+            )
             raise ValueError(f"❎ API response error: {valid_resp['message']}")
 
     _save_cache(model, prompt, resp_content, resp_type, resp, log_title=log_title)
     return resp
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from rich import print as rprint
-    
-    result = ask_gpt("""test respond ```json\n{\"code\": 200, \"message\": \"success\"}\n```""", resp_type="json")
+
+    result = ask_gpt(
+        """test respond ```json\n{\"code\": 200, \"message\": \"success\"}\n```""",
+        resp_type="json",
+    )
     rprint(f"Test json output result: {result}")
